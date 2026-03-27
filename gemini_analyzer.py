@@ -26,12 +26,9 @@ def analyze_topic_with_gemini(topic, text_content, api_key):
     """將該主題的考題送給 Gemini，要求萃取最豐富的醫學關鍵字"""
     genai.configure(api_key=api_key)
     
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 🌟 為了確保相容所有版本的套件，將字數設定為 20,0000 字元 (仍可容納海量考題)
+    truncated_text = text_content[:200000] 
     
-    # 🌟 升級 1：大幅放寬閱讀字數，讓 AI 看到更多題目
-    truncated_text = text_content[:500000] 
-    
-    # 🌟 升級 2：多維度探勘提示詞 (Prompt)，強制逼出 30~50 個豐富詞彙
     prompt = f"""
     你現在是一位台灣的「專業醫事檢驗師」與「國考出題委員」。
     以下是屬於【{topic}】這個分類的國考題庫內容：
@@ -54,12 +51,22 @@ def analyze_topic_with_gemini(topic, text_content, api_key):
     """
     
     try:
+        # 優先嘗試使用較新的代號
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
         response = model.generate_content(prompt)
         clean_text = clean_json_response(response.text)
         keywords = json.loads(clean_text)
         return keywords
     except Exception as e:
-        return [f"API_ERROR: 解析或連線失敗 ({str(e)})"]
+        try:
+            # 🌟 雙重備援機制：如果伺服器套件太舊報錯(404)，自動降級使用最穩定的 gemini-pro
+            model_fallback = genai.GenerativeModel('gemini-pro')
+            response_fallback = model_fallback.generate_content(prompt)
+            clean_text = clean_json_response(response_fallback.text)
+            keywords = json.loads(clean_text)
+            return keywords
+        except Exception as fallback_e:
+            return [f"API_ERROR: 雙重連線皆失敗 ({str(fallback_e)})"]
 
 # ==========================================
 # 4. Word 題庫解析與分類引擎 (極速無圖版)
@@ -120,7 +127,7 @@ def parse_docx_for_analysis(uploaded_file, mapping):
 st.set_page_config(page_title="Gemini 聯網題庫分析引擎", page_icon="🧠", layout="wide")
 
 st.title("🧠 Gemini 聯網題庫智慧探勘引擎 (深度挖掘版)")
-st.write("已內建 API Key！系統將深入閱讀高達 5 萬字的考題，並從「疾病、標記、機制、技術」四大維度，為您提煉出 30~50 個最豐富的醫學專業關鍵字。")
+st.write("已內建 API Key！系統將深入閱讀高達 3 萬字的考題，並從「疾病、標記、機制、技術」四大維度，為您提煉出 30~50 個最豐富的醫學專業關鍵字。")
 
 if GEMINI_API_KEY == "請在這裡貼上您的_API_KEY" or not GEMINI_API_KEY:
     st.error("⚠️ 系統尚未設定 API Key！請先在程式碼第 10 行填入您的 Gemini API Key。")
