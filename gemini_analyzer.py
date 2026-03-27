@@ -10,7 +10,7 @@ import google.generativeai as genai
 GEMINI_API_KEY = "AIzaSyBHXWWa6wPbHZSQ0tlxoP-XDxNI2hOifN0"
 
 # ==========================================
-# 2. 內部輔助函數：清洗 Gemini 回傳的 JSON (安全防呆版)
+# 2. 內部輔助函數：清洗 Gemini 回傳的 JSON 
 # ==========================================
 def clean_json_response(text):
     """清除 LLM 可能自帶的 Markdown 標記，避開引號換行錯誤"""
@@ -26,8 +26,7 @@ def analyze_topic_with_gemini(topic, text_content, api_key):
     """將該主題的考題送給 Gemini，要求萃取最豐富的醫學關鍵字"""
     genai.configure(api_key=api_key)
     
-    # 🌟 為了確保相容所有版本的套件，將字數設定為 20,0000 字元 (仍可容納海量考題)
-    truncated_text = text_content[:200000] 
+    truncated_text = text_content[:30000] 
     
     prompt = f"""
     你現在是一位台灣的「專業醫事檢驗師」與「國考出題委員」。
@@ -51,22 +50,29 @@ def analyze_topic_with_gemini(topic, text_content, api_key):
     """
     
     try:
-        # 優先嘗試使用較新的代號
-        model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # 🌟 終極防呆：動態尋找這把鑰匙能用的模型名單
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        if not available_models:
+            return ["API_ERROR: 您的 API Key 無法存取任何生成模型，請確認帳號權限。"]
+            
+        # 優先挑選 1.5-flash，沒有的話找 1.5-pro，再沒有就抓名單裡第一個能用的！
+        target_model_name = available_models[0]
+        for m_name in available_models:
+            if 'gemini-1.5-flash' in m_name:
+                target_model_name = m_name
+                break
+            elif 'gemini-1.5-pro' in m_name:
+                target_model_name = m_name
+                
+        model = genai.GenerativeModel(target_model_name)
         response = model.generate_content(prompt)
         clean_text = clean_json_response(response.text)
         keywords = json.loads(clean_text)
         return keywords
+        
     except Exception as e:
-        try:
-            # 🌟 雙重備援機制：如果伺服器套件太舊報錯(404)，自動降級使用最穩定的 gemini-pro
-            model_fallback = genai.GenerativeModel('gemini-pro')
-            response_fallback = model_fallback.generate_content(prompt)
-            clean_text = clean_json_response(response_fallback.text)
-            keywords = json.loads(clean_text)
-            return keywords
-        except Exception as fallback_e:
-            return [f"API_ERROR: 雙重連線皆失敗 ({str(fallback_e)})"]
+        return [f"API_ERROR: 系統連線或解析失敗 ({str(e)})"]
 
 # ==========================================
 # 4. Word 題庫解析與分類引擎 (極速無圖版)
@@ -126,8 +132,8 @@ def parse_docx_for_analysis(uploaded_file, mapping):
 # ==========================================
 st.set_page_config(page_title="Gemini 聯網題庫分析引擎", page_icon="🧠", layout="wide")
 
-st.title("🧠 Gemini 聯網題庫智慧探勘引擎 (深度挖掘版)")
-st.write("已內建 API Key！系統將深入閱讀高達 3 萬字的考題，並從「疾病、標記、機制、技術」四大維度，為您提煉出 30~50 個最豐富的醫學專業關鍵字。")
+st.title("🧠 Gemini 聯網題庫智慧探勘引擎 (動態防呆版)")
+st.write("已內建 API Key！系統將動態偵測可用的 AI 模型，深入閱讀高達 3 萬字的考題，並為您提煉出 30~50 個最豐富的醫學專業關鍵字。")
 
 if GEMINI_API_KEY == "請在這裡貼上您的_API_KEY" or not GEMINI_API_KEY:
     st.error("⚠️ 系統尚未設定 API Key！請先在程式碼第 10 行填入您的 Gemini API Key。")
@@ -176,7 +182,7 @@ if uploaded_word and st.button("🚀 啟動 Gemini 深度聯網分析", type="pr
     topics = [str(t) for t in topic_contents.keys() if str(t) != "未分類" and str(t).strip()]
     
     for i, topic in enumerate(topics):
-        status_text.markdown(f"**🔄 正在呼叫 Gemini 深度分析單元：【{topic}】... ({i+1}/{len(topics)})**")
+        status_text.markdown(f"**🔄 正在自動切換並呼叫模型分析：【{topic}】... ({i+1}/{len(topics)})**")
         
         text_to_analyze = topic_contents[topic]
         ai_suggested_keywords = analyze_topic_with_gemini(topic, text_to_analyze, GEMINI_API_KEY)
